@@ -2,8 +2,13 @@ require_relative 'book_in_stock'
 require_relative 'database'
 require 'dalli'
 
+
+
+
 class DataAccess 
-  $LocalCacheMaximumSize = 100
+  $LocalCacheMaximumSize = 1000
+  $LocalCachesimpleCacheMaximumSize = 1000
+
 
   def initialize (data_base,remote_cache) 
         @database = data_base
@@ -34,15 +39,13 @@ class DataAccess
   end 
 
   def localSimpleMemoryCheck
-    display_cache
-    if @localCache.size > $LocalCacheMaximumSize
+    if @localCache.to_s.length > $LocalCachesimpleCacheMaximumSize
       @localCache = {}
     end
   end
     
   def localComplexDataCheck
-    display_complex_cache
-    if @localCacheForcomplexData.size > $LocalCacheMaximumSize
+    if @localCacheForcomplexData.to_s.length > $LocalCacheMaximumSize
       @localCacheForcomplexData = {}
     end
   end
@@ -52,17 +55,13 @@ class DataAccess
    @localCacheForcomplexData.each {|k,v| puts "#{k} - #{v}"  }
   end 
 
-  def findISBNFromDatabase isbn
-       book = @database.findISBN isbn
-  end
-
   def findISBNFromServerCache isbn, version
     tempVersion = version
     if version   
        serial = @Remote_cache.get "#{version}_#{isbn}"
        book = BookInStock.from_cache serial
     else   # Not in cache, so add it.
-       book = findISBNFromDatabase isbn
+       book = @database.findISBN isbn
        if book
           tempVersion = 1
           @Remote_cache.set "v_#{book.isbn}",1  
@@ -77,7 +76,7 @@ class DataAccess
     version = @Remote_cache.get "v_#{isbn}"
     if bookHash && version && bookHash[:version] == version
         book = bookHash[:book]
-        localSimpleMemoryCheck
+        display_cache
     else
       bookInfo = findISBNFromServerCache(isbn, version)
       book = bookInfo[:book]
@@ -85,6 +84,7 @@ class DataAccess
       if book
         bookHash = {:book => book, :version => version}
         @localCache["#{isbn}"] = bookHash
+        localSimpleMemoryCheck
       end
     end
     book
@@ -107,11 +107,12 @@ class DataAccess
 
       booksIsbnsAry.each do |isbn|
         version = @Remote_cache.get "v_#{isbn}"
-        bskKeyAry << "#{isbn}_#{version}"
+        bskKeyAry << "#{version}_#{isbn}"
       end
 
       bsComplexKey = bskKeyAry.join(",")
       booksInfo = @Remote_cache.get "#{author}_#{bsComplexKey}"
+
 
       if booksInfo && booksInfo.length > 0
           booksInfo.split(";").each do |book|
@@ -134,17 +135,17 @@ class DataAccess
           bksIsbnsAry << b.isbn
           version = @Remote_cache.get "v_#{b.isbn}"
           if version
-            bskKeyAry << "#{b.isbn}_#{version}"
+            bskKeyAry << "#{version}_#{b.isbn}"
           else
             @Remote_cache.set "v_#{b.isbn}",1  
             @Remote_cache.set "1_#{b.isbn}", b.to_cache
-            bskKeyAry << "#{b.isbn}_1"
+            bskKeyAry << "1_#{b.isbn}"
           end
         end
         booksIsbns = bksIsbnsAry.join(",")
         bsComplexKey = bskKeyAry.join(",")
         booksInfo = booksInfoAry.join(";")
-
+      puts bsComplexKey
         @Remote_cache.set "bks_#{author}",booksIsbns
         @Remote_cache.set "#{author}_#{bsComplexKey}",booksInfo
       end
@@ -161,26 +162,16 @@ class DataAccess
     booksIsbns = @Remote_cache.get "bks_#{author}"
     complexKey = constructComplexKey booksIsbns
 
-    puts bookHash
-    puts booksIsbns
-    puts complexKey
-
-puts "%%%%%%%%%%%%%%%%"
     if bookHash && booksIsbns && bookHash[:isbns] == booksIsbns \
       && complexKey && complexKey == bookHash[:complexKey]
         books = bookHash[:books]
-        localComplexDataCheck
-              puts "sssssssssssss"
-
+        display_complex_cache
     else
-      # puts "1111111111111"
-
       result = authorSearchFromServerCache author
       if result
-              # puts "1111111111111"
-
         @localCacheForcomplexData["bks_#{author}"] = result
         books = result[:books] 
+        localComplexDataCheck
       else
         puts "here is not any book exist"
       end
@@ -197,7 +188,7 @@ puts "%%%%%%%%%%%%%%%%"
     booksIsbnsAry.each do |isbn|
       version = @Remote_cache.get "v_#{isbn}"
       if version
-        bskKeyAry << "#{isbn}_#{version}"
+        bskKeyAry << "#{version}_#{isbn}"
       end
     end
     complexKey = bskKeyAry.join(",")
@@ -220,7 +211,7 @@ puts "%%%%%%%%%%%%%%%%"
     if version
       @Remote_cache.set "v_#{book.isbn}",version+1  
       @Remote_cache.set "#{version+1}_#{book.isbn}", book.to_cache
-      updateBookToLocalCache book, version
+      updateBookToLocalCache book, version+1
     end
   end
 
@@ -248,7 +239,7 @@ puts "%%%%%%%%%%%%%%%%"
     version = @Remote_cache.get "v_#{book.isbn}"
     if version
       @Remote_cache.set "v_#{book.isbn}",nil 
-      @Remote_cache.set "#{version+1}_#{book.isbn}", nil
+      @Remote_cache.set "#{version}_#{book.isbn}", nil
     end
   end
 
